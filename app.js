@@ -32,7 +32,7 @@ dotenv.config({ path: '.env.example' });
 /**
  * API keys and Passport configuration.
  */
-const passportConfig = require('./config/passport');
+const passportMiddleware = require('./middlewares/passport');
 
 /**
  * Create Express server.
@@ -55,6 +55,8 @@ const app = express();
 /**
  * Express configuration.
  */
+const ignoreSession = /^\/(?!api\/).*/;
+
 app.set('host', '0.0.0.0');
 app.set('port', process.env.PORT || 8080);
 app.use(expressStatusMonitor());
@@ -65,35 +67,55 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   resave: true,
-  saveUninitialized: true,
+  saveUninitialized: false,
   secret: process.env.SESSION_SECRET || 'my secret',
-  cookie: { maxAge: 1209600000 }, // two weeks in milliseconds
+  cookie: { maxAge: Number(process.env.SESSION_MAXAGE) }, // two weeks in milliseconds
 }));
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use('/oauth2/eko', passport.authenticate('eko'));
-app.use(process.env.EKO_CALLBACK_URL, passport.authenticate('eko'), (req, res) => {
-  res.json(req.user);
-});
+// Rate limit
+require('./middlewares/ratelimit')(app);
 
-app.use('/api', passport.authenticate('jwt'), (req, res) => {    
-  res.end(`HELLO API => ${req.user.firstname}`);
-});
+// Save return to
+// app.use((req, res, next) => {
+//   if (req.session && !req.user && !req.path.match(/^\/oauth2/)) {
+//     req.session.returnTo = req.originalUrl;
+//   }
+//   next();
+// });
 
-// After this will proxy to 
+// Proxy to SSR
 app.use(require('./middlewares/proxy')(process.env.PROXY_TO));
+
 app.use(flash());
-app.use((req, res, next) => {
-  if (req.path === '/api/upload') {
-    next();
-  } else {
-    lusca.csrf()(req, res, next);
-  }
-});
 app.use(lusca.xframe('SAMEORIGIN'));
 app.use(lusca.xssProtection(true));
 app.disable('x-powered-by');
+
+// Eko OAuth2
+app.get('/oauth2/eko', passport.authenticate('eko'));
+app.get(process.env.EKO_CALLBACK_URL, passport.authenticate('eko', { failureRedirect: '/error' }), (req, res) => {
+  res.redirect(req.session.returnTo ? req.session.returnTo : '/');
+});
+app.post('/oauth2/slo', passportMiddleware.logout, (req, res) => {
+  res.end('Waiting for implement');
+});
+
+// Eko APIs
+const testController = require('./controllers/test');
+app.all('/api/*', passport.authenticate('jwt', { session: false }), testController.test);
+
+app.get('/public', (req, res) => {
+  res.end('public');
+});
+app.get('/test', (req, res) => {
+  if (req.isAuthenticated()) {
+    res.end(`Login as ${req.user.firstname}`);
+  } else {
+    res.redirect('/oauth2/eko');
+  }
+});
 
 /**
  * Error Handler.

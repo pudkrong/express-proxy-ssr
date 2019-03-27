@@ -6,6 +6,8 @@ const jwt = require('jsonwebtoken');
 const _ = require('lodash');
 const redisClient = require('../utils/redis');
 const Promise = require('bluebird');
+const crypto = require('crypto');
+const Joi = require('joi');
 
 passport.serializeUser((user, done) => {
   done(null, user._id.toString());
@@ -38,10 +40,13 @@ const EkoOAuth2Strategy = new OAuth2Strategy({
 }, (req, accessToken, refreshToken, profile, done) => {
   const tokens = { accessToken, refreshToken };
   Promise.all([
+      // Save user profile into DB
       redisClient.set(`db:${profile._id}`, JSON.stringify(profile)),
-      redisClient.set(`token:${req.session.id}`, JSON.stringify(tokens), 'ex', Number(process.env.EKO_ACCESS_TOKEN_EXPIREIN)),
+      // Save session id associated to user
+      redisClient.set(`user:${profile._id}`, req.session.id, 'ex', Math.floor(req.session.cookie.maxAge / 1000)),
     ])
-    .then(() => { 
+    .then(() => {    
+      req.session.tokens = tokens;   
       done(null, profile); 
     })
     .catch(done);
@@ -57,15 +62,27 @@ EkoOAuth2Strategy.userProfile = (accessToken, done) => {
   });
 };
 passport.use('eko', EkoOAuth2Strategy);
-
+ 
 passport.use('jwt', new JwtStrategy({
   secretOrKey: process.env.JWT_SECRET,
   jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
   algorithms: ['HS256'],
-  ignoreExpiration: false,
+  ignoreExpiration: true,
   passReqToCallback: true
-}, (req, payload, done) => {
-  done(null, _.omit(payload, 'iat', 'exp'));
+}, async (req, payload, done) => {  
+  try {
+    // Double check to user is still valid
+    const sessionId = await redisClient.get(`user:${payload._id}`);
+    if (!sessionId) throw new Error('Session is not found');
+
+    const session = await Promise.promisify(req.sessionStore.get, { context: req.sessionStore })(sessionId);
+    if (!session) throw new Error('User is not found');
+
+    return done(null, _.omit(payload, 'iat', 'exp'));
+  } catch (err) {
+    console.error(`PUD:: ==> `, err);
+    return done(null, false);
+  }
 }));
 
 /**
@@ -86,4 +103,20 @@ exports.isAuthorized = (req, res, next) => {
     return next();
   }
   res.redirect('/oauth2/eko');
+};
+
+exports.logout = async (req, res, next) => {
+  try {
+    const schema = Joi.object().keys({
+      expire: Joi.date().timestamp('unix'),
+      request: Joi.string().trim(),
+    }).requiredKeys('expire', 'request');
+
+    const { expire, request } = Joi.attempt(req.body, schema);
+   
+    req.sessionStore.destroy(req.session.id);
+    next();
+  } catch (err) {
+    next(err);
+  }
 };

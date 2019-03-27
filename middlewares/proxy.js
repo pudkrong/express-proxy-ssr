@@ -12,15 +12,21 @@ module.exports = (host) => {
     proxyReqOptDecorator: async (proxyReqOpts, srcReq) => { 
       const user = srcReq.user;
       if (user) {      
-        const ttl = await redisClient.ttl(`token:${srcReq.session.id}`);
         proxyReqOpts.headers['x-eko-user'] = jwt.sign(user, process.env.JWT_SECRET, {
           algorithm: process.env.JWT_ALGORITHM,
-          expiresIn: `${ttl}s`
         });
-      } 
+      }
 
+      proxyReqOpts.headers['host'] = process.env.PROXY_TO;
       return proxyReqOpts;
-    }, 
+    },
+    filter: (req, res) => {
+      const shouldProxy = !req.path.match(/^\/(oauth2|api|test|public)/, 'i');
+      return shouldProxy;
+    },
+    proxyReqPathResolver: (req) => {
+      return `/${req.method.toLowerCase()}`;
+    } 
   });
 }
 
