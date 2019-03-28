@@ -52,7 +52,7 @@ module.exports = (rules) => {
       return proxyReqOpts;
     },
     filter: (req, res) => {
-      const shouldProxy = !req.path.match(/^\/(oauth2|api|test|public)/, 'i');
+      const shouldProxy = !req.path.match(/^\/(oauth2|api|user|public)/, 'i');
       return shouldProxy;
     },
     proxyReqPathResolver: (req) => {

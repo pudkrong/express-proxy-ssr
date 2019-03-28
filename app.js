@@ -94,9 +94,13 @@ app.use(lusca.xssProtection(true));
 app.disable('x-powered-by');
 
 // Eko OAuth2
-app.get('/oauth2/eko', passport.authenticate('eko'));
-app.get(process.env.EKO_CALLBACK_URL, passport.authenticate('eko', { failureRedirect: '/error' }), (req, res) => {
-  res.redirect(req.session.returnTo ? req.session.returnTo : '/');
+const oauth2List = process.env.EKO_OAUTH2_LIST.split(',');
+oauth2List.forEach((item) => {
+  const [name] = item.split('|');
+  app.get(`/oauth2/${name}`, passport.authenticate(name));  
+  app.get(`/oauth2/${name}/callback`, passport.authenticate(name, { failureRedirect: '/error' }), (req, res) => {
+    res.redirect(req.session.returnTo ? req.session.returnTo : '/user');
+  });  
 });
 app.post('/oauth2/slo', passportMiddleware.logout, (req, res) => {
   res.end('Waiting for implement');
@@ -109,11 +113,11 @@ app.all('/api/*', passport.authenticate('jwt', { session: false }), testControll
 app.get('/public', (req, res) => {
   res.end('public');
 });
-app.get('/test', (req, res) => {
+app.get('/user', (req, res) => {
   if (req.isAuthenticated()) {
     res.end(`Login as ${req.user.firstname}`);
   } else {
-    res.redirect('/oauth2/eko');
+    res.end(`You are not login yet`);
   }
 });
 

@@ -28,40 +28,45 @@ passport.deserializeUser((id, done) => {
 /**
  * Eko API OAuth.
  */
-const EkoOAuth2Strategy = new OAuth2Strategy({
-  authorizationURL: process.env.EKO_AUTHORIZE_URL,
-  tokenURL: process.env.EKO_TOKEN_URL,
-  clientID: process.env.EKO_CLIENT_ID,
-  clientSecret: process.env.EKO_SECRET,
-  callbackURL: process.env.EKO_CALLBACK_URL,
-  passReqToCallback: true,
-  scope: process.env.EKO_SCOPE,
-  state: true,
-}, (req, accessToken, refreshToken, profile, done) => {
-  const tokens = { accessToken, refreshToken };
-  Promise.all([
-      // Save user profile into DB
-      redisClient.set(`db:${profile._id}`, JSON.stringify(profile)),
-      // Save session id associated to user
-      redisClient.set(`user:${profile._id}`, req.session.id, 'ex', Math.floor(req.session.cookie.maxAge / 1000)),
-    ])
-    .then(() => {    
-      req.session.tokens = tokens;   
-      done(null, profile); 
-    })
-    .catch(done);
-});
-EkoOAuth2Strategy.userProfile = (accessToken, done) => {
-  axios
-  .get(process.env.EKO_USER_INFO_URL, { headers: { Authorization: `Bearer ${accessToken}` }})
-  .then((data) => { 
-    done(null, data.data); 
-  })
-  .catch((err) => { 
-    done(err); 
+const oauth2List = process.env.EKO_OAUTH2_LIST.split(',');
+oauth2List.forEach((item) => {
+  const [name, clientId, clientSecret, host] = item.split('|');
+
+  const EkoOAuth2Strategy = new OAuth2Strategy({
+    authorizationURL: host + process.env.EKO_AUTHORIZE_URL,
+    tokenURL: host + process.env.EKO_TOKEN_URL,
+    clientID: clientId,
+    clientSecret: clientSecret,
+    callbackURL: `/oauth2/${name}/callback`,
+    passReqToCallback: true,
+    scope: process.env.EKO_SCOPE,
+    state: true,
+  }, (req, accessToken, refreshToken, profile, done) => {
+    const tokens = { accessToken, refreshToken };
+    Promise.all([
+        // Save user profile into DB
+        redisClient.set(`db:${profile._id}`, JSON.stringify(profile)),
+        // Save session id associated to user
+        redisClient.set(`user:${profile._id}`, req.session.id, 'ex', Math.floor(req.session.cookie.maxAge / 1000)),
+      ])
+      .then(() => {    
+        req.session.tokens = tokens;   
+        done(null, profile); 
+      })
+      .catch(done);
   });
-};
-passport.use('eko', EkoOAuth2Strategy);
+  EkoOAuth2Strategy.userProfile = (accessToken, done) => {
+    axios
+    .get(host + process.env.EKO_USER_INFO_URL, { headers: { Authorization: `Bearer ${accessToken}` }})
+    .then((data) => { 
+      done(null, data.data); 
+    })
+    .catch((err) => { 
+      done(err); 
+    });
+  };
+  passport.use(name, EkoOAuth2Strategy);
+});
  
 passport.use('jwt', new JwtStrategy({
   secretOrKey: process.env.JWT_SECRET,
