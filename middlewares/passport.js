@@ -73,14 +73,14 @@ passport.use('jwt', new JwtStrategy({
   try {
     // Double check to user is still valid
     const sessionId = await redisClient.get(`user:${payload._id}`);
-    if (!sessionId) throw new Error('Session is not found');
+    if (!sessionId) throw new Error('User session id is not found');
 
     const session = await Promise.promisify(req.sessionStore.get, { context: req.sessionStore })(sessionId);
-    if (!session) throw new Error('User is not found');
+    if (!session) throw new Error('User session data is not found');
 
     return done(null, _.omit(payload, 'iat', 'exp'));
   } catch (err) {
-    console.error(`PUD:: ==> `, err);
+    console.error(`JWT authentication error`, err);
     return done(null, false);
   }
 }));

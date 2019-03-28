@@ -86,7 +86,7 @@ require('./middlewares/ratelimit')(app);
 // });
 
 // Proxy to SSR
-app.use(require('./middlewares/proxy')(process.env.PROXY_TO));
+app.use(require('./middlewares/proxy')(process.env.PROXY_RULES));
 
 app.use(flash());
 app.use(lusca.xframe('SAMEORIGIN'));
