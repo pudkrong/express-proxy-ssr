@@ -1,6 +1,12 @@
 /**
  * Module dependencies.
  */
+const dotenv = require('dotenv');
+/**
+ * Load environment variables from .env file, where API keys and passwords are configured.
+ */
+dotenv.config({ path: '.env.example' });
+
 const express = require('express');
 const compression = require('compression');
 const session = require('express-session');
@@ -11,7 +17,6 @@ const logger = require('morgan');
 const chalk = require('chalk');
 const errorHandler = require('errorhandler');
 const lusca = require('lusca');
-const dotenv = require('dotenv');
 const flash = require('express-flash');
 const path = require('path');
 const passport = require('passport');
@@ -19,11 +24,6 @@ const expressStatusMonitor = require('express-status-monitor');
 const multer = require('multer');
 
 const upload = multer({ dest: path.join(__dirname, 'uploads') });
-
-/**
- * Load environment variables from .env file, where API keys and passwords are configured.
- */
-dotenv.config({ path: '.env.example' });
 
 /**
  * Controllers (route handlers).
