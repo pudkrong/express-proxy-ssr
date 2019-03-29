@@ -55,8 +55,6 @@ const app = express();
 /**
  * Express configuration.
  */
-const ignoreSession = /^\/(?!api\/).*/;
-
 app.set('host', '0.0.0.0');
 app.set('port', process.env.PORT || 8080);
 app.use(expressStatusMonitor());
