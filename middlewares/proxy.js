@@ -2,93 +2,103 @@ const proxy = require('express-http-proxy');
 const url = require('url');
 const redisClient = require('../utils/redis');
 const jwt = require('jsonwebtoken');
-const cheerio = require('cheerio');
+const _ = require('lodash');
 
-module.exports = (rules) => {
+module.exports = (rules, options) => {
+  options = _.defaultsDeep(options, {
+    preserveRoutes: '^\/(oauth2|api|user)',
+    proxy: {
+      timeout: 10000,
+      limit: '10mb',
+      getHost: getHost,
+      filter: filter,
+      rewritePath: rewritePath,
+      proxyReq: proxyReq,
+    }
+  });
+
+  const preserveRoutesRegex = new RegExp(options.preserveRoutes);
   const rulesMap = rules.split(',').reduce((acc, rule) => {
     const data = rule.split('=');
-    const path = data[0].toLowerCase().trim().replace(/\//, '');
+    const path = data[0].toLowerCase().trim();
     const host = data[1].toLowerCase().trim();
 
     if (path == '*') {
       acc.default = host;
     } else {
+      const isHost = /^[\w\.]+(\:\d+)?$/.test(path);
+      const pathRegex = isHost ? new RegExp(`${path.replace(/\./g, '\.')}`) : new RegExp(path);
       acc.rules.push({
-        path: path,
-        pathRegex: new RegExp(`^\/${path}\/|^\/${path}$`, 'i'),
-        host: host,
+        isHost,
+        path,
+        pathRegex,
+        host,
       });
     }
 
     return acc;
   }, { rules: [], default: null });
 
-  function getHost(req) {  
+  function getHost (req) {  
     return req.selectedHost;
   }
 
-  return proxy(getHost, {
-    timeout: 20000,
-    limit: '10mb',
+  function filter (req, res) {
+    const selectedRule = rulesMap.rules.find((rule) => {
+      return rule.isHost ? 
+        rule.pathRegex.test(req.headers.host || '') : 
+        rule.pathRegex.test(req.url);
+    });
+
+    if (selectedRule) {
+      req.selectedHost = selectedRule.host;
+      if (selectedRule.isHost) {
+        req.rewritePath = req.url;
+      } else {
+        const matches = selectedRule.pathRegex.exec(req.url);
+        const newPath = req.url.replace(matches[0], '');
+        req.rewritePath = (newPath[0] == '/') ? newPath : `/${newPath}`;
+      }
+
+      return true;
+    } else {
+      req.selectedHost = rulesMap.default;
+      req.rewritePath = req.url;
+
+      return req.selectedHost ? !preserveRoutesRegex.test(req.path) : false;
+    }
+  }
+
+  function rewritePath (req) {
+    return req.rewritePath;
+  }
+
+  function proxyReq (proxyReqOpts, srcReq) {
+    const user = srcReq.user;
+    if (user) {      
+      proxyReqOpts.headers['x-eko-user'] = jwt.sign(user, process.env.JWT_SECRET, {
+        algorithm: process.env.JWT_ALGORITHM,
+      });
+    }
+
+    return proxyReqOpts;
+  }
+
+  // To modify response before passing to user
+  // This is good to change html content
+  function modifyRes () {
+
+  }
+
+  return proxy(options.proxy.getHost, {
+    timeout: options.proxy.timeout,
+    limit: options.proxy.limit,
     preserveHostHdr: false,
     parseReqBody: false,
     memoizeHost: false,
-    proxyReqOptDecorator: async (proxyReqOpts, srcReq) => { 
-      const user = srcReq.user;
-      if (user) {      
-        proxyReqOpts.headers['x-eko-user'] = jwt.sign(user, process.env.JWT_SECRET, {
-          algorithm: process.env.JWT_ALGORITHM,
-        });
-      }
-
-      return proxyReqOpts;
-    },
-    filter: (req, res) => {
-      const selectedRule = rulesMap.rules.filter(rule => {
-        return rule.pathRegex.test(req.path);
-      });
-      if (selectedRule.length) {
-        req.selectedHost = selectedRule[0].host;
-        req.rewritePath = selectedRule[0].path;
-        return true;
-      } else {
-        req.selectedHost = rulesMap.default;
-        return rulesMap.default ? !req.path.match(/^\/(oauth2|api|user|public)/, 'i') : false;
-      }
-    },
-    proxyReqPathResolver: (req) => {
-      if (req.rewritePath) {
-        const replaceRegex = new RegExp(`^\/${req.rewritePath}\/|^\/${req.rewritePath}$`, 'i');
-
-        return req.path.replace(replaceRegex, '/');
-      } else {
-        return req.path;
-      }
-    },
-    userResDecorator: (proxyRes, proxyResData, userReq, userRes) => {
-      if (/\.(js|css|jpe?g|gif|png|svg|ttf)$/i.test(userReq.path)) {
-        return proxyResData;
-      } else {
-        // Rewrite path
-        const pathPrefix = userReq.rewritePath;
-        if (!pathPrefix) {
-          return proxyResData;
-        } else {
-          const $ = cheerio.load(proxyResData.toString('utf-8'));
-          $('[src]').each((i, el) => {
-            const orig = $(el).attr('src');
-            if (!/^http/.test(orig)) $(el).attr('src', `/${pathPrefix}${orig}`);
-          });
-
-          $('[href]').each((i, el) => {
-            const orig = $(el).attr('href');
-            if (!/^http/.test(orig)) $(el).attr('href', `/${pathPrefix}${orig}`);
-          }); 
-
-          return $.html();         
-        }
-      }
-    }
+    proxyReqOptDecorator: options.proxy.proxyReq,
+    filter: options.proxy.filter,
+    proxyReqPathResolver: options.proxy.rewritePath,
   });
 }
 

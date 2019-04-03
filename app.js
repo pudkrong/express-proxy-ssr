@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
  */
 dotenv.config({ path: '.env.example' });
 
+const http = require('http');
 const express = require('express');
 const compression = require('compression');
 const session = require('express-session');
@@ -56,7 +57,7 @@ const app = express();
  * Express configuration.
  */
 app.set('host', '0.0.0.0');
-app.set('port', process.env.PORT || 8080);
+app.set('port', Number(process.env.PORT || 8080));
 app.use(expressStatusMonitor());
 app.use(compression());
 app.use(logger('dev'));
@@ -138,10 +139,12 @@ if (process.env.NODE_ENV === 'development') {
 redisClient
   .connect()
   .then(() => {
-    app.listen(app.get('port'), () => {
-      console.log('%s App is running at http://localhost:%d in %s mode', chalk.green('✓'), app.get('port'), app.get('env'));
-      console.log('  Press CTRL-C to stop\n');
-    });
+    for (let i = 0; i < Number(process.env.SPAWN || 1); i++) {
+      const port = app.get('port') + i;
+      http.createServer(app).listen(port, () => {
+        console.log('%s App is running at http://localhost:%d in %s mode', chalk.green('✓'), port, app.get('env'));
+      });
+    }
   });
 
 module.exports = app;
