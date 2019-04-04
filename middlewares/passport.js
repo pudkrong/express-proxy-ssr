@@ -30,7 +30,7 @@ passport.deserializeUser((id, done) => {
  */
 const oauth2List = process.env.EKO_OAUTH2_LIST.split(',');
 oauth2List.forEach((item) => {
-  const [name, clientId, clientSecret, host] = item.split('|');
+  const [name, clientId, clientSecret, host, returnTo] = item.split('|');
 
   const EkoOAuth2Strategy = new OAuth2Strategy({
     authorizationURL: host + process.env.EKO_AUTHORIZE_URL,
@@ -41,19 +41,30 @@ oauth2List.forEach((item) => {
     passReqToCallback: true,
     scope: process.env.EKO_SCOPE,
     state: true,
-  }, (req, accessToken, refreshToken, profile, done) => {
-    const tokens = { accessToken, refreshToken };
-    Promise.all([
+  }, async (req, accessToken, refreshToken, profile, done) => {
+    try {
+      const tokens = { accessToken, refreshToken };
+      const authCode = crypto.randomBytes(24).toString('hex');
+      const profileStr = JSON.stringify(profile);
+
+      await redisClient
+        .multi()
         // Save user profile into DB
-        redisClient.set(`db:${profile._id}`, JSON.stringify(profile)),
+        .set(`db:${profile._id}`, profileStr)
         // Save session id associated to user
-        redisClient.set(`user:${profile._id}`, req.session.id, 'ex', Math.floor(req.session.cookie.maxAge / 1000)),
-      ])
-      .then(() => {    
-        req.session.tokens = tokens;   
-        done(null, profile); 
-      })
-      .catch(done);
+        .set(`user:${profile._id}`, req.session.id, 'ex', Math.floor(req.session.cookie.maxAge / 1000))
+        // Save authCode
+        .set(`authcode:${authCode}:cookie`, req.headers.cookie, 'ex', 60)
+        .set(`authcode:${authCode}:user`, profileStr, 'ex', 60)
+        .exec();
+
+      req.session.tokens = tokens;
+      req.session.returnTo = `${returnTo}?eko-auth-code=${authCode}`;
+
+      done(null, profile);
+    } catch (error) {
+      done(error);
+    }
   });
   EkoOAuth2Strategy.userProfile = (accessToken, done) => {
     axios

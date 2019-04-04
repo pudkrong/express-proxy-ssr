@@ -14,6 +14,7 @@ module.exports = (rules, options) => {
       filter: filter,
       rewritePath: rewritePath,
       proxyReq: proxyReq,
+      modifyResHeaders: modifyResHeaders,
     }
   });
 
@@ -53,6 +54,7 @@ module.exports = (rules, options) => {
     if (selectedRule) {
       req.selectedHost = selectedRule.host;
       if (selectedRule.isHost) {
+        req.target = selectedRule.path;
         req.rewritePath = req.url;
       } else {
         const matches = selectedRule.pathRegex.exec(req.url);
@@ -73,8 +75,16 @@ module.exports = (rules, options) => {
     return req.rewritePath;
   }
 
-  function proxyReq (proxyReqOpts, srcReq) {
-    const user = srcReq.user;
+  async function proxyReq (proxyReqOpts, srcReq) {
+    let user;
+    if (srcReq.user) {
+      user = srcReq.user;
+    } else if (srcReq.query['eko-auth-code']) {
+      const authCode = srcReq.query['eko-auth-code'];
+      const userData = await redisClient.get(`authcode:${authCode}:user`);
+      if (userData) user = JSON.parse(userData);
+    }
+
     if (user) {      
       proxyReqOpts.headers['x-eko-user'] = jwt.sign(user, process.env.JWT_SECRET, {
         algorithm: process.env.JWT_ALGORITHM,
@@ -84,10 +94,18 @@ module.exports = (rules, options) => {
     return proxyReqOpts;
   }
 
-  // To modify response before passing to user
-  // This is good to change html content
-  function modifyRes () {
+  async function modifyResHeaders (headers, userReq, userRes, proxyReq, proxyRes) {
+    const authCode = userReq.query['eko-auth-code'];
+    if (authCode) {
+      const cookie = await redisClient.get(`authcode:${authCode}:cookie`);
+      headers['set-cookie'] = cookie;
+    }
 
+    if (userReq.target) {
+      headers['host'] = userReq.target;
+    }
+
+    return headers;
   }
 
   return proxy(options.proxy.getHost, {
@@ -99,6 +117,7 @@ module.exports = (rules, options) => {
     proxyReqOptDecorator: options.proxy.proxyReq,
     filter: options.proxy.filter,
     proxyReqPathResolver: options.proxy.rewritePath,
+    userResHeaderDecorator: options.proxy.modifyResHeaders,
   });
 }
 

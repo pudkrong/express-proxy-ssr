@@ -97,8 +97,8 @@ const oauth2List = process.env.EKO_OAUTH2_LIST.split(',');
 oauth2List.forEach((item) => {
   const [name] = item.split('|');
   app.get(`/oauth2/${name}`, passport.authenticate(name));  
-  app.get(`/oauth2/${name}/callback`, passport.authenticate(name, { failureRedirect: '/error' }), (req, res) => {
-    res.redirect(req.session.returnTo ? req.session.returnTo : '/user');
+  app.get(`/oauth2/${name}/callback`, passport.authenticate(name, { failureRedirect: '/error' }), (req, res) => {    
+    res.redirect(req.session.returnTo ? req.session.returnTo : '/login');
   });  
 });
 app.post('/oauth2/slo', passportMiddleware.logout, (req, res) => {
