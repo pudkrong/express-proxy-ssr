@@ -91,6 +91,8 @@ module.exports = (rules, options) => {
       });
     }
 
+    delete  proxyReqOpts.headers.cookie;
+
     return proxyReqOpts;
   }
 
